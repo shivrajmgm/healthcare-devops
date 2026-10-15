@@ -1,0 +1,15 @@
+---
+- name: Configure Healthcare App Server
+  hosts: localhost
+  become: yes
+  tasks:
+    - name: Ensure system packages are updated
+      apt:
+        update_cache: yes
+        upgrade: dist
+        
+    - name: Ensure Docker service is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
