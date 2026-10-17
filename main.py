@@ -1,5 +1,6 @@
 import os
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
@@ -23,6 +24,14 @@ class AppointmentModel(Base):
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Healthcare Appointment Service", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods (POST, GET, etc.)
+    allow_headers=["*"],  # Allows all headers
+)
 
 class AppointmentCreate(BaseModel):
     patient_name: str
