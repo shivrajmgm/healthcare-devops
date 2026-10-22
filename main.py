@@ -2,7 +2,7 @@ import os
 import urllib.request
 import json
 from typing import List, Optional
-
+from sqlalchemy import create_engine, Column, Integer, String, func
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -155,4 +155,19 @@ def symptom_triage(data: TriageRequest):
     return {
         "specialty": specialist, 
         "assigned_doctor": doctor_mapping.get(specialist)
+    }
+@app.get("/admin/stats")
+def get_admin_stats(db: Session = Depends(get_db)):
+    total_appointments = db.query(AppointmentModel).count()
+    total_revenue = total_appointments * 500 
+    
+    doctor_stats = db.query(
+        AppointmentModel.doctor_name, 
+        func.count(AppointmentModel.id)
+    ).group_by(AppointmentModel.doctor_name).all()
+    
+    return {
+        "total_appointments": total_appointments,
+        "total_revenue": total_revenue,
+        "doctor_load": [{"doctor": doc, "count": count} for doc, count in doctor_stats]
     }
