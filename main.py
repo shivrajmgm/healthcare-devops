@@ -1,9 +1,9 @@
 import os
 import urllib.request
 import json
+from typing import List, Optional
 
 from fastapi import FastAPI, Depends, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import create_engine, Column, Integer, String
@@ -26,6 +26,8 @@ class AppointmentModel(Base):
     patient_email = Column(String)
     doctor_name = Column(String)
     appointment_date = Column(String)
+    payment_status = Column(String, default="Paid")
+    prescription = Column(String, nullable=True, default="")
 
 Base.metadata.create_all(bind=engine)
 
@@ -33,18 +35,10 @@ app = FastAPI(title="Healthcare Appointment Service", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allows all web browsers
+    allow_origins=["*"], 
     allow_credentials=True,
-    allow_methods=["*"], # Allows POST requests
+    allow_methods=["*"], 
     allow_headers=["*"],
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
-    allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods (POST, GET, etc.)
-    allow_headers=["*"],  # Allows all headers
 )
 
 class AppointmentCreate(BaseModel):
@@ -53,6 +47,17 @@ class AppointmentCreate(BaseModel):
     patient_email: str
     doctor_name: str
     appointment_date: str
+
+class AppointmentResponse(AppointmentCreate):
+    id: int
+    prescription: Optional[str] = ""
+    payment_status: str = "Paid"
+    
+    class Config:
+        from_attributes = True
+
+class PrescriptionUpdate(BaseModel):
+    prescription: str
 
 def get_db():
     db = SessionLocal()
@@ -67,25 +72,26 @@ def health_check():
 
 @app.post("/appointments")
 def create_appointment(data: AppointmentCreate, db: Session = Depends(get_db)):
-    # 1. Save the appointment (including phone number) to PostgreSQL
     appointment = AppointmentModel(
         patient_name=data.patient_name,
         patient_phone=data.patient_phone, 
         patient_email=data.patient_email,
         doctor_name=data.doctor_name,
-        appointment_date=data.appointment_date
+        appointment_date=data.appointment_date,
+        payment_status="Paid",
+        prescription=""
     )
     db.add(appointment)
     db.commit()
     db.refresh(appointment)
 
-    # 2. Trigger AWS Lambda to send the SMS
     lambda_url = "https://h3xonabeb37s5xcup7oxwyobwy0skbyp.lambda-url.ap-southeast-2.on.aws/"  
     
     payload = json.dumps({
         "patient_name": data.patient_name,
         "patient_phone": data.patient_phone,
         "patient_email": data.patient_email,
+        "doctor_name": data.doctor_name,
         "appointment_date": data.appointment_date
     }).encode('utf-8')
 
@@ -100,3 +106,53 @@ def create_appointment(data: AppointmentCreate, db: Session = Depends(get_db)):
 @app.get("/appointments")
 def list_appointments(db: Session = Depends(get_db)):
     return db.query(AppointmentModel).all()
+
+@app.get("/appointments/doctor/{doctor_name}", response_model=List[AppointmentResponse])
+def get_doctor_appointments(doctor_name: str, db: Session = Depends(get_db)):
+    appointments = db.query(AppointmentModel).filter(AppointmentModel.doctor_name == doctor_name).all()
+    return appointments
+
+@app.put("/appointments/{appointment_id}/prescription")
+def update_prescription(appointment_id: int, data: PrescriptionUpdate, db: Session = Depends(get_db)):
+    appointment = db.query(AppointmentModel).filter(AppointmentModel.id == appointment_id).first()
+    if not appointment:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    
+    appointment.prescription = data.prescription
+    db.commit()
+    
+    return {"message": "Prescription saved successfully", "prescription": appointment.prescription}
+
+class TriageRequest(BaseModel):
+    symptoms: str
+
+@app.post("/triage")
+def symptom_triage(data: TriageRequest):
+    symptoms = data.symptoms.lower()
+    
+    if any(word in symptoms for word in ["headache", "migraine", "dizziness", "vision", "brain"]):
+        specialist = "Neurologist"
+    elif any(word in symptoms for word in ["chest", "heart", "palpitations", "breath"]):
+        specialist = "Cardiologist"
+    elif any(word in symptoms for word in ["bone", "joint", "back", "knee", "fracture", "muscle"]):
+        specialist = "Orthopedist"
+    elif any(word in symptoms for word in ["skin", "rash", "acne", "itch"]):
+        specialist = "Dermatologist"
+    elif any(word in symptoms for word in ["stomach", "pain", "nausea", "vomit", "digestion"]):
+        specialist = "Gastroenterologist"
+    else:
+        specialist = "General Physician"
+        
+    doctor_mapping = {
+        "Neurologist": "Dr. Smith (Neurology)",
+        "Cardiologist": "Dr. Davis (Cardiology)",
+        "Orthopedist": "Dr. Jones (Orthopedics)",
+        "Dermatologist": "Dr. Lee (Dermatology)",
+        "Gastroenterologist": "Dr. Gupta (Gastro)",
+        "General Physician": "Dr. Adams (General)"
+    }
+    
+    return {
+        "specialty": specialist, 
+        "assigned_doctor": doctor_mapping.get(specialist)
+    }
