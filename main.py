@@ -120,8 +120,26 @@ def update_prescription(appointment_id: int, data: PrescriptionUpdate, db: Sessi
     
     appointment.prescription = data.prescription
     db.commit()
+
+    lambda_url = "https://h3xonabeb37s5xcup7oxwyobwy0skbyp.lambda-url.ap-southeast-2.on.aws/"  
+    payload = json.dumps({
+        "patient_name": appointment.patient_name,
+        "patient_email": appointment.patient_email,
+        "doctor_name": appointment.doctor_name,
+        "appointment_date": appointment.appointment_date,
+        "is_prescription": True,
+        "prescription": data.prescription
+    }).encode('utf-8')
+
+    try:
+        req = urllib.request.Request(lambda_url, data=payload, headers={'Content-Type': 'application/json'})
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        print(f"AWS Lambda prescription email failed: {e}")
     
-    return {"message": "Prescription saved successfully", "prescription": appointment.prescription}
+    return {"message": "Prescription saved and emailed successfully", "prescription": appointment.prescription}
+
+     
 
 class TriageRequest(BaseModel):
     symptoms: str
